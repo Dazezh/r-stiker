@@ -1,0 +1,36 @@
+/**
+ * SPDX-FileCopyrightText: 2026 R-Stiker contributors
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+/*
+ * Sticker messages carry the absolute sticker URL as transport format, but the
+ * URL itself must never be visible: the sticker is the message.
+ */
+.rich-text--wrapper a[href*="/apps/r-stiker/s/"],
+.markdown-message a[href*="/apps/r-stiker/s/"],
+.message a[href*="/apps/r-stiker/s/"] {
+	display: none !important;
+}
+
+/* A message which contained nothing but the sticker link shows only the sticker. */
+.rich-text--wrapper p:has(> a[href*="/apps/r-stiker/s/"]:only-child) {
+	display: none !important;
+}
+
+/*
+ * NcReferenceWidget wraps custom widgets in a card (border, background, margins).
+ * Stickers are rendered bare, so that chrome is disabled for the sticker widget.
+ * The class is set by StickerReference.vue when it is mounted.
+ */
+.widget-custom.r-stiker-host {
+	border: none !important;
+	background: none !important;
+	box-shadow: none !important;
+	margin-block: 0 !important;
+}
+
+.widget-custom.r-stiker-host .widget-custom__content {
+	padding: 0 !important;
+	background: none !important;
+}
