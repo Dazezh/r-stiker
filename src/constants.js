@@ -10,6 +10,9 @@ export const REFERENCE_TYPE = 'r-stiker'
 
 export const FAVORITES_STORAGE_KEY = 'r-stiker-favorites'
 
+/** Local copy of the sticker list (packs and the pages which were opened). */
+export const STICKER_CACHE_KEY = 'r-stiker-stickers'
+
 export const STICKERS_PER_PAGE = 60
 
 export const MAX_STICKER_SIZE = 5 * 1024 * 1024

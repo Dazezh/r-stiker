@@ -51,13 +51,34 @@ class ApiController extends OCSController {
 		return new DataResponse($pack);
 	}
 
+	/**
+	 * Revision of the whole sticker library. The Smart Picker compares it with
+	 * the revision of its locally cached sticker list to decide whether the
+	 * cached copy is still up to date.
+	 */
+	#[PublicPage]
+	#[NoCSRFRequired]
+	public function getRevision(): DataResponse {
+		$response = new DataResponse(['revision' => $this->stickerService->getRevision()]);
+		// The answer has to be fresh on every call, a cached revision would keep
+		// the frontend on its outdated copy forever.
+		$response->cacheFor(0);
+
+		return $response;
+	}
+
+	/**
+	 * Sticker page of a pack.
+	 *
+	 * Deliberately not HTTP-cached: the frontend keeps its own copy of the list
+	 * and only reloads it when the revision changed (see getRevision), so a
+	 * browser cache would hand out exactly the outdated list this mechanism was
+	 * built to avoid.
+	 */
 	#[PublicPage]
 	#[NoCSRFRequired]
 	public function getStickers(string $pack, int $cursor = 0, int $limit = 60): DataResponse {
-		$response = new DataResponse($this->stickerService->getStickers($pack, $cursor, $limit));
-		$response->cacheFor(60 * 60);
-
-		return $response;
+		return new DataResponse($this->stickerService->getStickers($pack, $cursor, $limit));
 	}
 
 	public function createPack(string $name = '', ?string $displayName = null, ?string $description = null): DataResponse {

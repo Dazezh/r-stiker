@@ -40,6 +40,28 @@ export async function fetchPacks() {
 }
 
 /**
+ * Revision of the whole sticker library.
+ *
+ * The Smart Picker keeps a local copy of the sticker list and compares the
+ * revision of that copy with this one: they are equal as long as nothing was
+ * added, removed or renamed, so the stickers themselves do not have to be
+ * downloaded at all.
+ *
+ * @return {Promise<string|null>} null when the revision is not available
+ */
+export async function fetchRevision() {
+	try {
+		const data = payload(await axios.get(generateOcsUrl(`apps/${APP_ID}/api/v1/revision`)))
+		return typeof data?.revision === 'string' && data.revision !== '' ? data.revision : null
+	} catch (error) {
+		// A missing revision is not an error: the cached list is used as it is
+		// and the caller falls back to comparing the pack list.
+		console.debug('r-stiker: could not read the sticker revision', error)
+		return null
+	}
+}
+
+/**
  * @param {string} pack pack name
  * @param {number} cursor offset
  * @param {number} limit page size

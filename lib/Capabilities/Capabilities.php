@@ -28,6 +28,9 @@ class Capabilities implements ICapability {
 				],
 				'stickers' => [
 					'formats' => StickerService::SUPPORTED_MIME_TYPES,
+					// GET /api/v1/revision: clients can compare it with the
+					// revision of their cached sticker list.
+					'revision' => true,
 				],
 				'smart-picker' => true,
 			],

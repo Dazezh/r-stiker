@@ -97,11 +97,25 @@ class StorageService {
 				}
 			}
 
+			$sizes = [];
+			if (is_array($metadata['sizes'] ?? null)) {
+				foreach ($metadata['sizes'] as $fileName => $size) {
+					if (is_string($fileName) && is_array($size) && isset($size[0], $size[1])) {
+						$width = (int)$size[0];
+						$height = (int)$size[1];
+						if ($width > 0 && $height > 0) {
+							$sizes[$fileName] = [$width, $height];
+						}
+					}
+				}
+			}
+
 			$displayName = is_string($metadata['displayName'] ?? null) ? trim($metadata['displayName']) : '';
 			$index[$packName] = [
 				'displayName' => $displayName !== '' ? $displayName : $packName,
 				'description' => is_string($metadata['description'] ?? null) ? $metadata['description'] : '',
 				'titles' => $titles,
+				'sizes' => $sizes,
 			];
 		}
 
@@ -199,7 +213,7 @@ class StorageService {
 	 */
 	public function readMetadata(string $packName): array {
 		return $this->getPackMetadata($packName)
-			?? ['displayName' => $packName, 'description' => '', 'titles' => []];
+			?? ['displayName' => $packName, 'description' => '', 'titles' => [], 'sizes' => []];
 	}
 
 	/**

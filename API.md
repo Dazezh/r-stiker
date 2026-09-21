@@ -76,6 +76,8 @@ GET /ocs/v2.php/apps/r-stiker/api/v1/stickers/{pack}?cursor=0&limit=60
           "id": "bW9jaGljYXQ6MC53ZWJw",
           "name": "0.webp",
           "title": "0",
+          "width": 512,
+          "height": 512,
           "thumbnailUrl": "https://cloud.example.com/apps/r-stiker/s/bW9jaGljYXQ6MC53ZWJw",
           "resourceUrl": "https://cloud.example.com/apps/r-stiker/s/bW9jaGljYXQ6MC53ZWJw"
         }
@@ -92,16 +94,56 @@ GET /ocs/v2.php/apps/r-stiker/api/v1/stickers/{pack}?cursor=0&limit=60
 | `entries[].id` | string | ID стикера (url-safe base64 от `pack:file`) |
 | `entries[].name` | string | Имя файла в хранилище |
 | `entries[].title` | string | Название (по умолчанию — имя файла без расширения) |
+| `entries[].width` | int | Настоящая ширина стикера в пикселях (0, если неизвестна) |
+| `entries[].height` | int | Настоящая высота стикера в пикселях (0, если неизвестна) |
 | `entries[].thumbnailUrl` | string | Абсолютный URL картинки |
 | `entries[].resourceUrl` | string | Абсолютный URL, который вставляется/отправляется в сообщение |
 | `cursor` | int \| null | Смещение следующей страницы, `null` — страниц больше нет |
 | `total` | int | Всего стикеров в паке |
 
-Ответ кэшируется на 1 час. Если пака нет — `entries: []`, `cursor: null`.
+Ответ не кэшируется браузером: клиент хранит список сам (см. раздел 4) и обновляет его
+только когда изменилась ревизия библиотеки. Если пака нет — `entries: []`, `cursor: null`.
 
 ---
 
-## 4. Картинка стикера
+## 4. Ревизия списка
+
+```
+GET /ocs/v2.php/apps/r-stiker/api/v1/revision
+```
+
+Отпечаток всей библиотеки стикеров: какие паки есть, как они называются, какие стикеры
+в них лежат и какие у этих стикеров названия и размеры. Меняется при любом изменении
+(добавление, удаление, переименование, перезагрузка файла).
+
+**200 OK**
+
+```json
+{
+  "ocs": {
+    "meta": { "status": "ok", "statuscode": 200, "message": "OK" },
+    "data": { "revision": "b9f1c0d3a7e24f5c8b6d0a1e2f3c4b5d6a7e8f9012345678abcdef012345678" }
+  }
+}
+```
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `revision` | string | sha256-отпечаток библиотеки |
+
+Ответ намеренно не кэшируется (`Cache-Control: no-cache, no-store, must-revalidate`).
+
+**Как это используют клиенты.** Список паков и стикеров кэшируется локально вместе с
+ревизией, при которой он был получен. При открытии интерфейс рисуется из кэша, затем
+запрашивается эта ручка:
+
+- ревизия совпала — стикеры не запрашиваются вообще;
+- ревизия другая — список паков и открытый пак перезапрашиваются, кэш заменяется;
+- запрос не удался — остаётся кэшированная копия.
+
+---
+
+## 5. Картинка стикера
 
 ```
 GET /apps/r-stiker/s/{stickerId}
@@ -130,9 +172,9 @@ GET /apps/r-stiker/s/{stickerId}
 
 ---
 
-## 5. Администрирование (только админ)
+## 6. Администрирование (только админ)
 
-### 5.1 Создать пак
+### 6.1 Создать пак
 
 ```
 POST /ocs/v2.php/apps/r-stiker/api/v1/packs
@@ -150,7 +192,7 @@ POST /ocs/v2.php/apps/r-stiker/api/v1/packs
 
 Допустимы буквы (включая кириллицу), цифры, пробел, `-`, `_`, `.`; максимум 64 символа.
 
-### 5.2 Изменить пак
+### 6.2 Изменить пак
 
 ```
 PUT /ocs/v2.php/apps/r-stiker/api/v1/packs/{pack}
@@ -161,7 +203,7 @@ PUT /ocs/v2.php/apps/r-stiker/api/v1/packs/{pack}
 
 **200 OK** — обновлённый пак.
 
-### 5.3 Удалить пак
+### 6.3 Удалить пак
 
 ```
 DELETE /ocs/v2.php/apps/r-stiker/api/v1/packs/{pack}
@@ -169,7 +211,7 @@ DELETE /ocs/v2.php/apps/r-stiker/api/v1/packs/{pack}
 
 **200 OK** — `{"deleted": true}` (вместе с паком удаляются все его стикеры).
 
-### 5.4 Загрузить стикер
+### 6.4 Загрузить стикер
 
 ```
 POST /ocs/v2.php/apps/r-stiker/api/v1/stickers/{pack}
@@ -187,7 +229,7 @@ Content-Type: multipart/form-data
 
 **201 Created** — созданный стикер (как в списке стикеров).
 
-### 5.5 Изменить название стикера
+### 6.5 Изменить название стикера
 
 ```
 PUT /ocs/v2.php/apps/r-stiker/api/v1/stickers/{pack}/{sticker}
@@ -197,7 +239,7 @@ PUT /ocs/v2.php/apps/r-stiker/api/v1/stickers/{pack}/{sticker}
 
 **200 OK** — обновлённый стикер. **404** — стикер не найден в паке.
 
-### 5.6 Удалить стикер
+### 6.6 Удалить стикер
 
 ```
 DELETE /ocs/v2.php/apps/r-stiker/api/v1/stickers/{pack}/{sticker}
@@ -207,7 +249,7 @@ DELETE /ocs/v2.php/apps/r-stiker/api/v1/stickers/{pack}/{sticker}
 
 ---
 
-## 6. Capabilities
+## 7. Capabilities
 
 ```
 GET /ocs/v2.php/cloud/capabilities
@@ -219,15 +261,20 @@ GET /ocs/v2.php/cloud/capabilities
     "version": 1,
     "protocol": 1,
     "reference": { "type": "r-stiker", "version": 1 },
-    "stickers": { "formats": ["image/png", "image/gif", "image/jpeg", "image/webp"] },
+    "stickers": {
+      "formats": ["image/png", "image/gif", "image/jpeg", "image/webp"],
+      "revision": true
+    },
     "smart-picker": true
   }
 }
 ```
 
+`stickers.revision: true` означает, что доступна ручка `GET /api/v1/revision` (раздел 4).
+
 ---
 
-## 7. Сообщения со стикерами
+## 8. Сообщения со стикерами
 
 В сообщении хранится только абсолютный URL стикера:
 
@@ -248,13 +295,21 @@ https://cloud.example.com/apps/r-stiker/s/bW9jaGljYXQ6MC53ZWJw
     "sticker": {
       "name": "0.webp",
       "title": "0",
+      "width": 512,
+      "height": 512,
       "image_url": "https://cloud.example.com/apps/r-stiker/s/bW9jaGljYXQ6MC53ZWJw",
       "thumbnail_url": "https://cloud.example.com/apps/r-stiker/s/bW9jaGljYXQ6MC53ZWJw"
-    }
+    },
+    "image_webp": true
   },
   "accessible": true
 }
 ```
+
+Поле `image_png`, `image_gif`, `image_jpeg` или `image_webp` ставится в `true`
+в зависимости от настоящего MIME-типа стикера. Клиенты без кастомного виджета
+`r-stiker` (мобильный/десктопный Talk и др.) благодаря этому рендерят стикер как
+изображение, используя `image_url`, `title` и `description`.
 
 и рендерит его кастомным виджетом `r-stiker` — без карточки, фона, заголовка и URL.
 

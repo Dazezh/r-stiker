@@ -16,6 +16,7 @@ return [
 		// Public read API (used by the Smart Picker).
 		['name' => 'api#getPacks', 'url' => '/api/v1/packs', 'verb' => 'GET'],
 		['name' => 'api#getPack', 'url' => '/api/v1/packs/{pack}', 'verb' => 'GET'],
+		['name' => 'api#getRevision', 'url' => '/api/v1/revision', 'verb' => 'GET'],
 		['name' => 'api#getStickers', 'url' => '/api/v1/stickers/{pack}', 'verb' => 'GET'],
 
 		// Administration API: admin rights are enforced by the security middleware.

@@ -64,6 +64,45 @@ class StickerService {
 	}
 
 	/**
+	 * Fingerprint of the whole sticker library: which packs exist, how they are
+	 * named, which stickers they contain and which titles and dimensions those
+	 * stickers have.
+	 *
+	 * The frontend keeps a local copy of the sticker list and compares this
+	 * revision with the revision of that copy. One small request is enough to
+	 * tell whether the cached list is still correct, so the stickers themselves
+	 * only have to be downloaded when something really changed.
+	 *
+	 * @return string
+	 */
+	public function getRevision(): string {
+		$signature = [];
+		foreach ($this->storage->getPackNames() as $packName) {
+			$metadata = $this->storage->readMetadata($packName);
+
+			$files = [];
+			foreach ($this->storage->getStickerFiles($packName) as $file) {
+				// Name, size and modification time change as soon as a sticker is
+				// replaced, added or removed.
+				$files[$file->getName()] = $file->getSize() . ':' . $file->getMTime();
+			}
+
+			$signature[] = [
+				'pack' => $packName,
+				'displayName' => $metadata['displayName'] ?? $packName,
+				'description' => $metadata['description'] ?? '',
+				'titles' => $metadata['titles'] ?? [],
+				'sizes' => $metadata['sizes'] ?? [],
+				'files' => $files,
+			];
+		}
+
+		$encoded = json_encode($signature, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+		return hash('sha256', $encoded === false ? '' : $encoded);
+	}
+
+	/**
 	 * @return array{name: string, displayName: string, description: string, stickerCount: int}
 	 */
 	public function createPack(string $name, ?string $displayName = null, ?string $description = null): array {
@@ -73,6 +112,7 @@ class StickerService {
 			'displayName' => $displayName !== null && trim($displayName) !== '' ? trim($displayName) : $name,
 			'description' => trim((string)$description),
 			'titles' => [],
+			'sizes' => [],
 		]);
 
 		$pack = $this->buildPackData($name);
@@ -142,7 +182,7 @@ class StickerService {
 
 		$entries = [];
 		foreach (array_slice($files, $cursor, $limit) as $file) {
-			$entries[] = $this->buildStickerEntry($packName, $file->getName(), $metadata['titles']);
+			$entries[] = $this->buildStickerEntry($packName, $file->getName(), $metadata);
 		}
 
 		$next = $cursor + count($entries);
@@ -172,7 +212,7 @@ class StickerService {
 
 		$metadata = $this->storage->readMetadata($packName);
 
-		return $this->buildStickerEntry($packName, $fileName, $metadata['titles'])
+		return $this->buildStickerEntry($packName, $fileName, $metadata)
 			+ [
 				'pack' => $packName,
 				'packDisplayName' => $metadata['displayName'],
@@ -257,9 +297,20 @@ class StickerService {
 		$metadata = $this->storage->readMetadata($packName);
 		$title = trim((string)$title);
 		$metadata['titles'][$fileName] = $title !== '' ? $title : pathinfo($fileName, PATHINFO_FILENAME);
+
+		// Store the intrinsic dimensions, so the widget can reserve a stable box.
+		$dimensions = @getimagesize($sourcePath);
+		if (is_array($dimensions)) {
+			$width = (int)($dimensions[0] ?? 0);
+			$height = (int)($dimensions[1] ?? 0);
+			if ($width > 0 && $height > 0) {
+				$metadata['sizes'][$fileName] = [$width, $height];
+			}
+		}
+
 		$this->storage->writeMetadata($packName, $metadata);
 
-		return $this->buildStickerEntry($packName, $fileName, $metadata['titles']);
+		return $this->buildStickerEntry($packName, $fileName, $metadata);
 	}
 
 	/**
@@ -277,7 +328,7 @@ class StickerService {
 		}
 		$this->storage->writeMetadata($packName, $metadata);
 
-		return $this->buildStickerEntry($packName, $fileName, $metadata['titles']);
+		return $this->buildStickerEntry($packName, $fileName, $metadata);
 	}
 
 	public function deleteSticker(string $packName, string $stickerId): void {
@@ -290,8 +341,84 @@ class StickerService {
 		$file->delete();
 
 		$metadata = $this->storage->readMetadata($packName);
-		unset($metadata['titles'][$fileName]);
+		unset($metadata['titles'][$fileName], $metadata['sizes'][$fileName]);
 		$this->storage->writeMetadata($packName, $metadata);
+	}
+
+	/**
+	 * Rebuilds the per-sticker metadata (titles and dimensions) from the actual
+	 * files in the storage. Used by occ r-stiker:rescan to repair packs whose
+	 * stickers were imported before the sizes feature existed.
+	 *
+	 * Custom titles are kept, entries of deleted stickers are dropped.
+	 *
+	 * @return array{packs: int, stickers: int, sized: int}
+	 */
+	public function rescanStickers(): array {
+		$packs = 0;
+		$stickers = 0;
+		$sized = 0;
+
+		foreach ($this->storage->getPackNames() as $packName) {
+			$metadata = $this->storage->readMetadata($packName);
+			$oldTitles = $metadata['titles'] ?? [];
+			$titles = [];
+			$sizes = [];
+
+			foreach ($this->storage->getStickerFiles($packName) as $file) {
+				$fileName = $file->getName();
+				$stickers++;
+
+				$titles[$fileName] = $oldTitles[$fileName] ?? pathinfo($fileName, PATHINFO_FILENAME);
+
+				[$width, $height] = $this->detectDimensions($file->getContent());
+				if ($width > 0 && $height > 0) {
+					$sizes[$fileName] = [$width, $height];
+					$sized++;
+				}
+			}
+
+			$metadata['titles'] = $titles;
+			$metadata['sizes'] = $sizes;
+			$this->storage->writeMetadata($packName, $metadata);
+			$packs++;
+		}
+
+		return ['packs' => $packs, 'stickers' => $stickers, 'sized' => $sized];
+	}
+
+	/**
+	 * Reads the intrinsic width and height of an image from its binary content.
+	 * The content is written to a temporary file, because getimagesize() only
+	 * works on file paths.
+	 *
+	 * @return array{0: int, 1: int}
+	 */
+	private function detectDimensions(string $content): array {
+		$tmp = tmpfile();
+		if ($tmp === false) {
+			return [0, 0];
+		}
+
+		$path = stream_get_meta_data($tmp)['uri'] ?? '';
+		try {
+			if ($path === '' || fwrite($tmp, $content) === false) {
+				return [0, 0];
+			}
+			fflush($tmp);
+
+			$dimensions = @getimagesize($path);
+			if (!is_array($dimensions)) {
+				return [0, 0];
+			}
+
+			$width = (int)($dimensions[0] ?? 0);
+			$height = (int)($dimensions[1] ?? 0);
+
+			return $width > 0 && $height > 0 ? [$width, $height] : [0, 0];
+		} finally {
+			fclose($tmp);
+		}
 	}
 
 	public function getMimeType(string $fileName): string {
@@ -365,19 +492,25 @@ class StickerService {
 	}
 
 	/**
-	 * @param array<string, string> $titles
-	 * @return array{id: string, name: string, title: string, thumbnailUrl: string, resourceUrl: string}
+	 * @param array{displayName: string, description: string, titles: array<string, string>, sizes: array<string, array{0: int, 1: int}>} $metadata
+	 * @return array{id: string, name: string, title: string, width: int, height: int, thumbnailUrl: string, resourceUrl: string}
 	 */
-	private function buildStickerEntry(string $packName, string $fileName, array $titles): array {
+	private function buildStickerEntry(string $packName, string $fileName, array $metadata): array {
 		$id = $this->encodeStickerId($packName, $fileName);
 		// Absolute on purpose: the URL is stored inside chat messages and has to
 		// stay valid when the message is federated to another instance.
 		$url = $this->urlGenerator->linkToRouteAbsolute('r-stiker.sticker.getSticker', ['stickerId' => $id]);
 
+		$titles = $metadata['titles'] ?? [];
+		$sizes = $metadata['sizes'] ?? [];
+		[$width, $height] = $sizes[$fileName] ?? [0, 0];
+
 		return [
 			'id' => $id,
 			'name' => $fileName,
 			'title' => $titles[$fileName] ?? pathinfo($fileName, PATHINFO_FILENAME),
+			'width' => $width,
+			'height' => $height,
 			'thumbnailUrl' => $url,
 			'resourceUrl' => $url,
 		];

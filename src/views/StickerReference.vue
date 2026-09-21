@@ -8,6 +8,7 @@
 			class="r-stiker__image"
 			:src="stickerUrl"
 			:alt="stickerAlt"
+			:style="stickerStyle"
 			loading="lazy"
 			decoding="async">
 	</div>
@@ -56,6 +57,26 @@ export default {
 			// Only used by screen readers, never rendered next to the sticker.
 			return this.richObject?.sticker?.title ?? ''
 		},
+
+		stickerWidth() {
+			return this.toPositiveInt(this.richObject?.sticker?.width)
+		},
+
+		stickerHeight() {
+			return this.toPositiveInt(this.richObject?.sticker?.height)
+		},
+
+		/**
+		 * Reserve the exact aspect ratio of the sticker, so the box is stable
+		 * before the image loads and nothing is stretched or distorted.
+		 * @return {object|null}
+		 */
+		stickerStyle() {
+			if (this.stickerWidth > 0 && this.stickerHeight > 0) {
+				return { aspectRatio: `${this.stickerWidth} / ${this.stickerHeight}` }
+			}
+			return null
+		},
 	},
 
 	mounted() {
@@ -69,6 +90,15 @@ export default {
 	},
 
 	methods: {
+		/**
+		 * @param {*} value possible dimension value
+		 * @return {number} the value as a positive integer, 0 if invalid
+		 */
+		toPositiveInt(value) {
+			const number = Number(value)
+			return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0
+		},
+
 		/**
 		 * The wrapper which the reference widget renders around custom widgets.
 		 * @return {HTMLElement|null}
@@ -131,6 +161,8 @@ export default {
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	/* Stable sticker box: fixed maximum size, aspect ratio preserved. */
+	width: min(100%, var(--r-stiker-size, 240px));
 	margin: 0;
 	padding: 0;
 	background: none;
@@ -140,9 +172,8 @@ export default {
 
 .r-stiker__image {
 	display: block;
-	width: auto;
+	width: 100%;
 	height: auto;
-	max-width: 100%;
 	max-height: 320px;
 	margin: 0;
 	padding: 0;

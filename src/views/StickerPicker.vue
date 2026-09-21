@@ -16,6 +16,11 @@
 			</button>
 		</div>
 
+		<p v-if="refreshing" class="sticker-picker__notice">
+			<NcLoadingIcon :size="16" />
+			{{ t('r-stiker', 'Обновление списка стикеров…') }}
+		</p>
+
 		<div v-if="loadingPacks || loading" class="sticker-picker__status">
 			<NcLoadingIcon :size="32" />
 		</div>
@@ -68,7 +73,14 @@ import { t } from '@nextcloud/l10n'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import { FAVORITES_STORAGE_KEY, STICKERS_PER_PAGE } from '../constants.js'
-import { fetchPacks, fetchStickers, messageFromError } from '../utils/api.js'
+import { fetchPacks, fetchRevision, fetchStickers, messageFromError } from '../utils/api.js'
+import {
+	getCachedPacks,
+	getCachedRevision,
+	getCachedStickers,
+	storePacks,
+	storeStickers,
+} from '../utils/cache.js'
 import { getTalkToken, sendTalkMessage } from '../utils/talk.js'
 
 const FAVORITES_TAB = 'favorites'
@@ -79,6 +91,10 @@ const FAVORITES_TAB = 'favorites'
  * A sticker is sent immediately: inside Talk the absolute sticker URL is posted
  * through the Talk chat API, everywhere else the URL is returned to the Smart
  * Picker so it can be inserted into the document.
+ *
+ * The sticker list is kept in localStorage. The picker opens with that copy and
+ * checks the library revision in the background: the list is only rebuilt (and
+ * the user told about it) when something really changed on the server.
  */
 export default {
 	name: 'StickerPicker',
@@ -96,9 +112,19 @@ export default {
 			activeTab: FAVORITES_TAB,
 			cursor: null,
 			hasMore: false,
+			/** pack the displayed stickers belong to, null while nothing is loaded */
+			loadedPack: null,
+			/** revision of the cached sticker list, null when there is no cache */
+			revision: null,
+			/** nothing to show yet: the first paint waits for the server */
 			loadingPacks: true,
+			/** the list is loaded and there is nothing to display yet */
 			loading: false,
+			/** the list is refreshed while the old copy stays on screen */
+			refreshing: false,
 			loadingMore: false,
+			/** the cached list is compared with the server */
+			syncing: false,
 			sending: false,
 			observer: null,
 		}
@@ -131,7 +157,8 @@ export default {
 
 	mounted() {
 		this.loadFavorites()
-		this.loadPacks()
+		// Show the cached copy at once, then check it against the server.
+		this.sync(!this.restoreFromCache())
 	},
 
 	beforeUnmount() {
@@ -141,29 +168,231 @@ export default {
 	methods: {
 		t,
 
-		async loadPacks() {
-			this.loadingPacks = true
-			try {
-				this.packs = await fetchPacks()
-			} catch (error) {
-				console.debug('r-stiker: could not load sticker packs', error)
-				showError(messageFromError(error))
-				this.packs = []
-			} finally {
-				this.loadingPacks = false
+		/**
+		 * Paint the sticker list of the last visit. Nothing is requested here:
+		 * the copy is only shown when it belongs to the current revision, the
+		 * background sync takes care of everything else.
+		 *
+		 * @return {boolean} true when a cached copy is on screen now
+		 */
+		restoreFromCache() {
+			const packs = getCachedPacks()
+			if (packs.length === 0) {
+				return false
 			}
 
+			this.packs = packs
+			this.revision = getCachedRevision()
+			this.loadingPacks = false
+
+			this.activeTab = this.openTab()
+			if (!this.isFavoritesTab) {
+				this.showCachedStickers(this.activeTab)
+			}
+			this.$nextTick(() => this.observeSentinel())
+
+			return true
+		},
+
+		/**
+		 * Bring the sticker list in line with the server.
+		 *
+		 * With a cached list on screen this runs in the background and the list
+		 * is only rebuilt when the library revision changed. Without a cache
+		 * there is nothing to show, so the first paint waits for this request.
+		 *
+		 * @param {boolean} blocking true when the list has to be loaded first
+		 */
+		async sync(blocking = false) {
+			if (this.syncing) {
+				return
+			}
+			this.syncing = true
+			if (blocking) {
+				this.loadingPacks = true
+			}
+
+			try {
+				const [packs, revision] = await Promise.all([fetchPacks(), fetchRevision()])
+				const packsChanged = JSON.stringify(packs) !== JSON.stringify(this.packs)
+				// The revision is the reliable signal. Without it (endpoint not
+				// available) the pack list is all we can compare.
+				const outdated = revision !== null ? revision !== this.revision : packsChanged
+				const cached = this.isFavoritesTab || this.loadedPack === this.activeTab
+
+				if (!blocking && !outdated && cached) {
+					return
+				}
+
+				this.packs = packs
+				storePacks(packs, revision)
+				this.revision = revision
+
+				// The pack of the open tab may have been renamed or removed.
+				const tab = this.openTab()
+				if (tab !== this.activeTab) {
+					this.activeTab = tab
+					this.stickers = []
+					this.cursor = null
+					this.hasMore = false
+					this.loadedPack = null
+				}
+
+				if (!this.isFavoritesTab) {
+					if (this.loadedPack === this.activeTab) {
+						this.refreshing = true
+					} else {
+						this.loading = true
+					}
+					this.applyStickers(await this.requestStickers(true))
+					this.loading = false
+					this.refreshing = false
+				}
+
+				if (!blocking && outdated) {
+					showSuccess(t('r-stiker', 'Список стикеров обновлён'))
+				}
+			} catch (error) {
+				console.debug('r-stiker: could not update the sticker list', error)
+				if (blocking) {
+					showError(messageFromError(error))
+					this.packs = []
+				}
+			} finally {
+				this.loadingPacks = false
+				this.loading = false
+				this.refreshing = false
+				this.syncing = false
+				this.$nextTick(() => {
+					this.observeSentinel()
+					// The user may have opened a pack which is still missing while
+					// the sync was running.
+					if (!this.isFavoritesTab && this.loadedPack !== this.activeTab) {
+						this.loadStickers(true)
+					}
+				})
+			}
+		},
+
+		/**
+		 * @return {string} tab which should be open
+		 */
+		openTab() {
+			const known = this.tabs.some((tab) => tab.key === this.activeTab)
+			if (known && (!this.isFavoritesTab || this.favorites.length > 0)) {
+				return this.activeTab
+			}
+
+			return this.defaultTab()
+		},
+
+		/**
+		 * @return {string} tab a fresh picker starts with
+		 */
+		defaultTab() {
 			if (this.favorites.length > 0) {
-				this.activeTab = FAVORITES_TAB
-				this.observeSentinel()
+				return FAVORITES_TAB
+			}
+
+			const pack = this.tabs.find((tab) => tab.key !== FAVORITES_TAB)
+			return pack ? pack.key : FAVORITES_TAB
+		},
+
+		/**
+		 * Show the cached stickers of a pack.
+		 *
+		 * @param {string} pack pack name
+		 * @return {boolean} true when a cached page was found
+		 */
+		showCachedStickers(pack) {
+			const cached = getCachedStickers(pack)
+			if (cached === null) {
+				return false
+			}
+
+			this.stickers = cached.entries
+			this.cursor = cached.cursor
+			this.hasMore = cached.cursor !== null
+			this.loadedPack = pack
+
+			return true
+		},
+
+		/**
+		 * Fetch one page of the open pack.
+		 *
+		 * @param {boolean} reset start at the beginning instead of appending
+		 * @return {Promise<object|null>} the page, null when the request failed
+		 */
+		async requestStickers(reset) {
+			if (this.isFavoritesTab) {
+				return null
+			}
+
+			const pack = this.activeTab
+			const cursor = reset ? 0 : (this.cursor ?? 0)
+
+			try {
+				const data = await fetchStickers(pack, cursor, STICKERS_PER_PAGE)
+				return {
+					pack,
+					reset,
+					entries: Array.isArray(data?.entries) ? data.entries : [],
+					cursor: data?.cursor ?? null,
+				}
+			} catch (error) {
+				console.debug('r-stiker: could not load stickers', error)
+				showError(messageFromError(error))
+				return null
+			}
+		},
+
+		/**
+		 * Show a fetched page and remember it for the next visit.
+		 *
+		 * @param {object|null} result page as returned by requestStickers()
+		 */
+		applyStickers(result) {
+			// A page which arrived after the user switched to another pack is
+			// dropped instead of being shown in the wrong tab.
+			if (result === null || result.pack !== this.activeTab) {
 				return
 			}
 
-			const firstPack = this.tabs.find((tab) => tab.key !== FAVORITES_TAB)
-			if (firstPack) {
-				this.selectTab(firstPack.key)
-			} else {
-				this.observeSentinel()
+			this.stickers = result.reset ? result.entries : [...this.stickers, ...result.entries]
+			this.cursor = result.cursor
+			this.hasMore = result.cursor !== null
+			this.loadedPack = result.pack
+
+			storeStickers(result.pack, this.stickers, this.cursor)
+			this.syncFavorites(result.entries)
+		},
+
+		/**
+		 * Replace stored favourites with the fresh data of a loaded page, so a
+		 * renamed sticker keeps its current title and URL.
+		 *
+		 * @param {Array} entries freshly loaded sticker entries
+		 */
+		syncFavorites(entries) {
+			if (this.favorites.length === 0 || entries.length === 0) {
+				return
+			}
+
+			const fresh = new Map(entries.map((entry) => [entry.id, entry]))
+			let changed = false
+			const favorites = this.favorites.map((favorite) => {
+				const entry = fresh.get(favorite.id)
+				if (!entry || JSON.stringify(entry) === JSON.stringify(favorite)) {
+					return favorite
+				}
+				changed = true
+				return entry
+			})
+
+			if (changed) {
+				this.favorites = favorites
+				this.saveFavorites()
 			}
 		},
 
@@ -176,8 +405,16 @@ export default {
 			this.stickers = []
 			this.cursor = null
 			this.hasMore = false
+			this.loadedPack = null
 
 			if (this.isFavoritesTab) {
+				this.$nextTick(() => this.observeSentinel())
+				return
+			}
+
+			// Known packs open instantly from the cache and are only reloaded
+			// when the background sync has not confirmed the copy yet.
+			if (this.showCachedStickers(key)) {
 				this.$nextTick(() => this.observeSentinel())
 			} else {
 				this.loadStickers(true)
@@ -188,39 +425,28 @@ export default {
 		 * @param {boolean} reset replace the list instead of appending
 		 */
 		async loadStickers(reset = false) {
-			if (this.isFavoritesTab) {
-				return
-			}
-			if (this.loadingMore || (this.loading && !reset)) {
+			if (this.isFavoritesTab || this.loading || this.loadingMore || this.refreshing) {
 				return
 			}
 
-			const packName = this.activeTab
-			const cursor = reset ? 0 : (this.cursor ?? 0)
 			if (reset) {
-				this.loading = true
+				// A list which is already on screen stays visible while it is
+				// replaced, so the picker is usable during the reload.
+				if (this.stickers.length > 0) {
+					this.refreshing = true
+				} else {
+					this.loading = true
+				}
 			} else {
 				this.loadingMore = true
 			}
 
-			try {
-				const data = await fetchStickers(packName, cursor, STICKERS_PER_PAGE)
-				const entries = Array.isArray(data?.entries) ? data.entries : []
-				this.stickers = reset ? entries : [...this.stickers, ...entries]
-				this.cursor = data?.cursor ?? null
-				this.hasMore = this.cursor !== null
-			} catch (error) {
-				console.debug('r-stiker: could not load stickers', error)
-				showError(messageFromError(error))
-				if (reset) {
-					this.stickers = []
-					this.hasMore = false
-				}
-			} finally {
-				this.loading = false
-				this.loadingMore = false
-				this.$nextTick(() => this.observeSentinel())
-			}
+			this.applyStickers(await this.requestStickers(reset))
+
+			this.loading = false
+			this.loadingMore = false
+			this.refreshing = false
+			this.$nextTick(() => this.observeSentinel())
 		},
 
 		loadMore() {
@@ -372,6 +598,16 @@ export default {
 	border-color: var(--color-primary-element);
 	background: var(--color-primary-element);
 	color: var(--color-primary-element-text);
+}
+
+.sticker-picker__notice {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	margin: -4px 0 8px;
+	color: var(--color-text-lighter);
+	font-size: 13px;
 }
 
 .sticker-picker__status {

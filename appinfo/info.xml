@@ -10,14 +10,14 @@ Sends stickers as separate sticker messages in Nextcloud Talk.
 Stickers are organised in packs, stored in the app data folder and served through
 absolute reference URLs, so sticker messages also work in federated conversations.
 	]]></description>
-	<version>1.0.0</version>
+	<version>1.1.0</version>
 	<licence>agpl</licence>
 	<author>balco</author>
 	<namespace>RStiker</namespace>
 	<category>integration</category>
 	<dependencies>
 		<php min-version="8.1"/>
-		<nextcloud min-version="30" max-version="34"/>
+		<nextcloud min-version="30" max-version="35"/>
 	</dependencies>
 	<settings>
 		<admin>OCA\RStiker\Settings\Admin</admin>
@@ -25,5 +25,6 @@ absolute reference URLs, so sticker messages also work in federated conversation
 	</settings>
 	<commands>
 		<command>OCA\RStiker\Command\ImportPacks</command>
+		<command>OCA\RStiker\Command\RescanPacks</command>
 	</commands>
 </info>

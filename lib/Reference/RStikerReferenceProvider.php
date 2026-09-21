@@ -87,12 +87,46 @@ class RStikerReferenceProvider extends ADiscoverableReferenceProvider implements
 			$imageUrl = $sticker['resourceUrl'];
 			$title = $sticker['title'];
 			$packLabel = $sticker['packDisplayName'];
+			$mimeType = $sticker['mime'];
+			$width = $sticker['width'];
+			$height = $sticker['height'];
 		} else {
 			// The sticker is hosted by the instance the message came from.
 			// Its absolute URL is self contained, so it is used as it is.
 			$imageUrl = $referenceText;
 			$title = pathinfo($fileName, PATHINFO_FILENAME);
 			$packLabel = $packName;
+			$mimeType = $this->stickerService->getMimeType($fileName);
+			$width = 0;
+			$height = 0;
+		}
+
+		$stickerData = [
+			'name' => $fileName,
+			'title' => $title,
+			'image_url' => $imageUrl,
+			'thumbnail_url' => $imageUrl,
+		];
+		if ($width > 0 && $height > 0) {
+			$stickerData['width'] = $width;
+			$stickerData['height'] = $height;
+		}
+
+		$richObject = [
+			'version' => 1,
+			'id' => $stickerId,
+			'pack' => [
+				'name' => $packLabel,
+			],
+			'sticker' => $stickerData,
+		];
+
+		// Clients without the custom "r-stiker" widget (mobile/desktop Talk, …)
+		// render the sticker as an image when this flag is set ("Images" section
+		// of the reference API documentation).
+		$imageFlag = self::getImageFlag($mimeType);
+		if ($imageFlag !== null) {
+			$richObject[$imageFlag] = true;
 		}
 
 		$reference = new Reference($referenceText);
@@ -100,19 +134,7 @@ class RStikerReferenceProvider extends ADiscoverableReferenceProvider implements
 		$reference->setTitle($title);
 		$reference->setDescription($packLabel);
 		$reference->setImageUrl($imageUrl);
-		$reference->setRichObject(self::REFERENCE_TYPE, [
-			'version' => 1,
-			'id' => $stickerId,
-			'pack' => [
-				'name' => $packLabel,
-			],
-			'sticker' => [
-				'name' => $fileName,
-				'title' => $title,
-				'image_url' => $imageUrl,
-				'thumbnail_url' => $imageUrl,
-			],
-		]);
+		$reference->setRichObject(self::REFERENCE_TYPE, $richObject);
 
 		return $reference;
 	}
@@ -127,12 +149,29 @@ class RStikerReferenceProvider extends ADiscoverableReferenceProvider implements
 	}
 
 	public function getCacheKey(string $referenceId): ?string {
-		// Sticker URLs are identical for every user.
-		return null;
+		// Nextcloud builds the final cache key from the prefix plus this key.
+		// Each sticker URL needs its own cache entry, so the reference id
+		// (the sticker URL) must be part of the key.
+		return $referenceId;
 	}
 
 	public function getCacheKeyPublic(string $referenceId, string $sharingToken): ?string {
-		return null;
+		// Sticker data does not depend on the sharing token.
+		return $referenceId;
+	}
+
+	/**
+	 * Reference API "Images" convention: set "image_<type>" to true so clients
+	 * without a custom widget can render the sticker as an image.
+	 */
+	private static function getImageFlag(string $mimeType): ?string {
+		return match ($mimeType) {
+			'image/png' => 'image_png',
+			'image/gif' => 'image_gif',
+			'image/jpeg' => 'image_jpeg',
+			'image/webp' => 'image_webp',
+			default => null,
+		};
 	}
 
 	private function getStickerId(string $referenceText): ?string {
