@@ -12,13 +12,22 @@
 				class="sticker-picker__tab"
 				:class="{ 'sticker-picker__tab--active': tab.key === activeTab }"
 				@click="selectTab(tab.key)">
+				<svg
+					v-if="tab.icon === 'clock'"
+					class="sticker-picker__tab-icon"
+					viewBox="0 0 24 24"
+					aria-hidden="true">
+					<path
+						fill="currentColor"
+						d="M11.99 2a10 10 0 1 0 .01 20 10 10 0 0 0-.01-20zM12 20a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z" />
+				</svg>
 				{{ tab.label }}
 			</button>
 		</div>
 
 		<p v-if="refreshing" class="sticker-picker__notice">
 			<NcLoadingIcon :size="16" />
-			{{ t('r-stiker', 'Обновление списка стикеров…') }}
+			{{ t('r-stiker', 'Updating stickers…') }}
 		</p>
 
 		<div v-if="loadingPacks || loading" class="sticker-picker__status">
@@ -39,7 +48,7 @@
 					<img
 						class="sticker-picker__image"
 						:src="sticker.thumbnailUrl"
-						:alt="sticker.title"
+						:alt="sticker.title || sticker.name"
 						loading="lazy"
 						decoding="async">
 				</button>
@@ -47,7 +56,7 @@
 					type="button"
 					class="sticker-picker__favorite"
 					:class="{ 'sticker-picker__favorite--active': isFavorite(sticker) }"
-					:title="isFavorite(sticker) ? t('r-stiker', 'Убрать из избранного') : t('r-stiker', 'В избранное')"
+					:title="isFavorite(sticker) ? t('r-stiker', 'Remove from favorites') : t('r-stiker', 'Add to favorites')"
 					@click.stop="toggleFavorite(sticker)">
 					{{ isFavorite(sticker) ? '★' : '☆' }}
 				</button>
@@ -61,7 +70,7 @@
 		</div>
 		<div v-else-if="hasMore" class="sticker-picker__more">
 			<NcButton variant="secondary" @click="loadMore()">
-				{{ t('r-stiker', 'Загрузить ещё') }}
+				{{ t('r-stiker', 'Load more') }}
 			</NcButton>
 		</div>
 	</div>
@@ -109,6 +118,7 @@ export default {
 			packs: [],
 			stickers: [],
 			favorites: [],
+			recent: [],
 			activeTab: FAVORITES_TAB,
 			cursor: null,
 			hasMore: false,
@@ -133,7 +143,8 @@ export default {
 	computed: {
 		tabs() {
 			return [
-				{ key: FAVORITES_TAB, label: t('r-stiker', '★ Избранное') },
+				{ key: FAVORITES_TAB, label: t('r-stiker', '★ Favorites') },
+				{ key: RECENT_TAB, label: t('r-stiker', 'Recent'), icon: 'clock' },
 				...this.packs
 					.filter((pack) => (pack.stickerCount ?? 0) > 0)
 					.map((pack) => ({ key: pack.name, label: pack.displayName || pack.name })),
@@ -144,19 +155,39 @@ export default {
 			return this.activeTab === FAVORITES_TAB
 		},
 
+		isRecentTab() {
+			return this.activeTab === RECENT_TAB
+		},
+
+		/** The active tab shows a list stored in the browser, not a pack. */
+		isLocalTab() {
+			return LOCAL_TABS.includes(this.activeTab)
+		},
+
 		visibleStickers() {
-			return this.isFavoritesTab ? this.favorites : this.stickers
+			if (this.isFavoritesTab) {
+				return this.favorites
+			}
+			if (this.isRecentTab) {
+				return this.recent
+			}
+			return this.stickers
 		},
 
 		emptyMessage() {
-			return this.isFavoritesTab
-				? t('r-stiker', 'Нет избранных стикеров')
-				: t('r-stiker', 'В этом паке нет стикеров')
+			if (this.isFavoritesTab) {
+				return t('r-stiker', 'No favorites yet')
+			}
+			if (this.isRecentTab) {
+				return t('r-stiker', 'No recent stickers yet')
+			}
+			return t('r-stiker', 'This pack is empty')
 		},
 	},
 
 	mounted() {
 		this.loadFavorites()
+		this.loadRecent()
 		// Show the cached copy at once, then check it against the server.
 		this.sync(!this.restoreFromCache())
 	},
@@ -186,7 +217,7 @@ export default {
 			this.loadingPacks = false
 
 			this.activeTab = this.openTab()
-			if (!this.isFavoritesTab) {
+			if (!this.isLocalTab) {
 				this.showCachedStickers(this.activeTab)
 			}
 			this.$nextTick(() => this.observeSentinel())
@@ -218,7 +249,7 @@ export default {
 				// The revision is the reliable signal. Without it (endpoint not
 				// available) the pack list is all we can compare.
 				const outdated = revision !== null ? revision !== this.revision : packsChanged
-				const cached = this.isFavoritesTab || this.loadedPack === this.activeTab
+				const cached = this.isLocalTab || this.loadedPack === this.activeTab
 
 				if (!blocking && !outdated && cached) {
 					return
@@ -238,7 +269,7 @@ export default {
 					this.loadedPack = null
 				}
 
-				if (!this.isFavoritesTab) {
+				if (!this.isLocalTab) {
 					if (this.loadedPack === this.activeTab) {
 						this.refreshing = true
 					} else {
@@ -249,8 +280,12 @@ export default {
 					this.refreshing = false
 				}
 
+				if (outdated) {
+					// Stickers may have been deleted since the last visit.
+					await this.pruneRecent()
+				}
 				if (!blocking && outdated) {
-					showSuccess(t('r-stiker', 'Список стикеров обновлён'))
+					showSuccess(t('r-stiker', 'Stickers updated'))
 				}
 			} catch (error) {
 				console.debug('r-stiker: could not update the sticker list', error)
@@ -267,7 +302,7 @@ export default {
 					this.observeSentinel()
 					// The user may have opened a pack which is still missing while
 					// the sync was running.
-					if (!this.isFavoritesTab && this.loadedPack !== this.activeTab) {
+					if (!this.isLocalTab && this.loadedPack !== this.activeTab) {
 						this.loadStickers(true)
 					}
 				})
@@ -279,7 +314,8 @@ export default {
 		 */
 		openTab() {
 			const known = this.tabs.some((tab) => tab.key === this.activeTab)
-			if (known && (!this.isFavoritesTab || this.favorites.length > 0)) {
+			// Favorites only makes sense as a landing tab when it has content.
+			if (known && (this.activeTab !== FAVORITES_TAB || this.favorites.length > 0)) {
 				return this.activeTab
 			}
 
@@ -294,7 +330,7 @@ export default {
 				return FAVORITES_TAB
 			}
 
-			const pack = this.tabs.find((tab) => tab.key !== FAVORITES_TAB)
+			const pack = this.tabs.find((tab) => !LOCAL_TABS.includes(tab.key))
 			return pack ? pack.key : FAVORITES_TAB
 		},
 
@@ -325,7 +361,7 @@ export default {
 		 * @return {Promise<object|null>} the page, null when the request failed
 		 */
 		async requestStickers(reset) {
-			if (this.isFavoritesTab) {
+			if (this.isLocalTab) {
 				return null
 			}
 
@@ -365,35 +401,45 @@ export default {
 			this.loadedPack = result.pack
 
 			storeStickers(result.pack, this.stickers, this.cursor)
-			this.syncFavorites(result.entries)
+
+			const favorites = this.withFreshData(this.favorites, result.entries)
+			if (favorites !== null) {
+				this.favorites = favorites
+				this.saveFavorites()
+			}
+
+			const recent = this.withFreshData(this.recent, result.entries)
+			if (recent !== null) {
+				this.recent = recent
+				this.saveRecent()
+			}
 		},
 
 		/**
-		 * Replace stored favourites with the fresh data of a loaded page, so a
-		 * renamed sticker keeps its current title and URL.
+		 * Replace stored copies of stickers with the fresh data of a loaded page,
+		 * so renamed stickers keep their current description and URL.
 		 *
+		 * @param {Array} list favorites or recent stickers
 		 * @param {Array} entries freshly loaded sticker entries
+		 * @return {Array|null} updated list, null when nothing changed
 		 */
-		syncFavorites(entries) {
-			if (this.favorites.length === 0 || entries.length === 0) {
-				return
+		withFreshData(list, entries) {
+			if (list.length === 0 || entries.length === 0) {
+				return null
 			}
 
 			const fresh = new Map(entries.map((entry) => [entry.id, entry]))
 			let changed = false
-			const favorites = this.favorites.map((favorite) => {
-				const entry = fresh.get(favorite.id)
-				if (!entry || JSON.stringify(entry) === JSON.stringify(favorite)) {
-					return favorite
+			const updated = list.map((sticker) => {
+				const entry = fresh.get(sticker.id)
+				if (!entry || JSON.stringify(entry) === JSON.stringify(sticker)) {
+					return sticker
 				}
 				changed = true
 				return entry
 			})
 
-			if (changed) {
-				this.favorites = favorites
-				this.saveFavorites()
-			}
+			return changed ? updated : null
 		},
 
 		selectTab(key) {
@@ -407,7 +453,7 @@ export default {
 			this.hasMore = false
 			this.loadedPack = null
 
-			if (this.isFavoritesTab) {
+			if (this.isLocalTab) {
 				this.$nextTick(() => this.observeSentinel())
 				return
 			}
@@ -425,7 +471,7 @@ export default {
 		 * @param {boolean} reset replace the list instead of appending
 		 */
 		async loadStickers(reset = false) {
-			if (this.isFavoritesTab || this.loading || this.loadingMore || this.refreshing) {
+			if (this.isLocalTab || this.loading || this.loadingMore || this.refreshing) {
 				return
 			}
 
@@ -495,18 +541,20 @@ export default {
 				if (token === null) {
 					// Not inside Talk: hand the absolute sticker URL to the Smart
 					// Picker (Text, Notes, …).
+					this.recordRecent(sticker)
 					this.returnToPicker(sticker.resourceUrl)
 					return
 				}
 
 				await sendTalkMessage(token, sticker.resourceUrl)
-				showSuccess(t('r-stiker', 'Стикер отправлен'))
+				this.recordRecent(sticker)
+				showSuccess(t('r-stiker', 'Sticker sent'))
 				// Close the picker without inserting anything into the composer:
 				// the sticker already is a message of its own.
 				this.returnToPicker('')
 			} catch (error) {
 				console.debug('r-stiker: could not send the sticker', error)
-				showError(t('r-stiker', 'Не удалось отправить стикер: {error}', { error: messageFromError(error) }))
+				showError(t('r-stiker', 'Could not send the sticker: {error}', { error: messageFromError(error) }))
 			} finally {
 				this.sending = false
 			}
@@ -522,24 +570,81 @@ export default {
 			this.$el.dispatchEvent(new CustomEvent('submit', { detail: result, bubbles: true }))
 		},
 
-		loadFavorites() {
+		/**
+		 * Read a list of stickers from localStorage.
+		 *
+		 * @param {string} key storage key
+		 * @return {Array} valid entries, empty when nothing usable is stored
+		 */
+		loadStickerList(key) {
 			try {
-				const raw = localStorage.getItem(FAVORITES_STORAGE_KEY)
+				const raw = localStorage.getItem(key)
 				const entries = raw ? JSON.parse(raw) : []
-				this.favorites = Array.isArray(entries)
+				return Array.isArray(entries)
 					? entries.filter((entry) => entry && typeof entry.id === 'string' && typeof entry.resourceUrl === 'string')
 					: []
 			} catch (error) {
-				console.debug('r-stiker: could not read the favorites', error)
-				this.favorites = []
+				console.debug(`r-stiker: could not read ${key}`, error)
+				return []
 			}
 		},
 
-		saveFavorites() {
+		saveStickerList(key, list) {
 			try {
-				localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(this.favorites))
+				localStorage.setItem(key, JSON.stringify(list))
 			} catch (error) {
-				console.debug('r-stiker: could not store the favorites', error)
+				console.debug(`r-stiker: could not store ${key}`, error)
+			}
+		},
+
+		loadFavorites() {
+			this.favorites = this.loadStickerList(FAVORITES_STORAGE_KEY)
+		},
+
+		saveFavorites() {
+			this.saveStickerList(FAVORITES_STORAGE_KEY, this.favorites)
+		},
+
+		loadRecent() {
+			this.recent = this.loadStickerList(RECENT_STORAGE_KEY)
+		},
+
+		saveRecent() {
+			this.saveStickerList(RECENT_STORAGE_KEY, this.recent)
+		},
+
+		/**
+		 * Remember a sticker that was just sent. The newest sticker comes first
+		 * and sending the same sticker again only moves it to the top.
+		 *
+		 * @param {object} sticker sticker entry
+		 */
+		recordRecent(sticker) {
+			this.recent = [
+				sticker,
+				...this.recent.filter((entry) => entry.id !== sticker.id),
+			].slice(0, MAX_RECENT_STICKERS)
+			this.saveRecent()
+		},
+
+		/**
+		 * Drop recent stickers which do not exist on the server anymore. Called
+		 * after a sync that saw a new library revision.
+		 */
+		async pruneRecent() {
+			if (this.recent.length === 0) {
+				return
+			}
+
+			try {
+				const existing = new Set(await checkStickerIds(this.recent.map((sticker) => sticker.id)))
+				const recent = this.recent.filter((sticker) => existing.has(sticker.id))
+				if (recent.length !== this.recent.length) {
+					this.recent = recent
+					this.saveRecent()
+				}
+			} catch (error) {
+				console.debug('r-stiker: could not check the recent stickers', error)
 			}
 		},
 
@@ -582,12 +687,21 @@ export default {
 }
 
 .sticker-picker__tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
 	padding: 6px 14px;
 	border: 1px solid var(--color-border-maxcontrast);
 	border-radius: var(--border-radius-pill);
 	background: var(--color-main-background);
 	color: var(--color-main-text);
 	cursor: pointer;
+}
+
+.sticker-picker__tab-icon {
+	width: 16px;
+	height: 16px;
+	flex: 0 0 auto;
 }
 
 .sticker-picker__tab:hover {

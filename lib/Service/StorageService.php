@@ -16,6 +16,7 @@ use OCP\Files\NotFoundException;
 use OCP\Files\NotPermittedException;
 use OCP\Files\SimpleFS\ISimpleFile;
 use OCP\Files\SimpleFS\ISimpleFolder;
+use OCP\IL10N;
 
 /**
  * Sticker storage inside the app data folder (no database, no user files):
@@ -39,6 +40,7 @@ class StorageService {
 
 	public function __construct(
 		private readonly IAppDataFactory $appDataFactory,
+		private readonly IL10N $l10n,
 	) {
 	}
 
@@ -58,7 +60,7 @@ class StorageService {
 			try {
 				return $appData->newFolder(self::PACKS_FOLDER);
 			} catch (NotPermittedException|NotFoundException $e) {
-				throw new \RuntimeException('Sticker storage is not writable', 0, $e);
+				throw new \RuntimeException($this->l10n->t('The sticker storage is not writable'), 0, $e);
 			}
 		}
 	}
@@ -132,7 +134,7 @@ class StorageService {
 			JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
 		);
 		if ($payload === false) {
-			throw new \RuntimeException('Could not encode the sticker index');
+			throw new \RuntimeException($this->l10n->t('The sticker index could not be encoded'));
 		}
 
 		$folder = $this->getPacksFolder();
@@ -141,7 +143,7 @@ class StorageService {
 		} catch (NotFoundException) {
 			$folder->newFile(self::INDEX_FILE, $payload);
 		} catch (\Exception $e) {
-			throw new \RuntimeException('Could not store the sticker index', 0, $e);
+			throw new \RuntimeException($this->l10n->t('The sticker index could not be saved'), 0, $e);
 		}
 	}
 
@@ -225,16 +227,16 @@ class StorageService {
 
 	public function createPackFolder(string $packName): ISimpleFolder {
 		if (!self::isValidPackName($packName)) {
-			throw new \InvalidArgumentException('Invalid pack name');
+			throw new \InvalidArgumentException($this->l10n->t('This pack name is not allowed'));
 		}
 		if ($this->getPackFolder($packName) !== null) {
-			throw new \InvalidArgumentException('Pack already exists');
+			throw new \InvalidArgumentException($this->l10n->t('A pack with this name already exists'));
 		}
 
 		try {
 			return $this->getPacksFolder()->newFolder($packName);
 		} catch (NotPermittedException|NotFoundException $e) {
-			throw new \RuntimeException('Could not create the pack folder', 0, $e);
+			throw new \RuntimeException($this->l10n->t('The pack folder could not be created'), 0, $e);
 		}
 	}
 
@@ -244,7 +246,7 @@ class StorageService {
 	public function renamePackFolder(string $from, string $to): void {
 		$source = $this->getPackFolder($from);
 		if ($source === null) {
-			throw new \InvalidArgumentException('Pack not found');
+			throw new \InvalidArgumentException($this->l10n->t('Pack not found'));
 		}
 
 		$target = $this->createPackFolder($to);
@@ -257,7 +259,7 @@ class StorageService {
 	public function deletePackFolder(string $packName): void {
 		$folder = $this->getPackFolder($packName);
 		if ($folder === null) {
-			throw new \InvalidArgumentException('Pack not found');
+			throw new \InvalidArgumentException($this->l10n->t('Pack not found'));
 		}
 
 		$folder->delete();

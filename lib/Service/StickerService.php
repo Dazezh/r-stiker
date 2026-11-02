@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace OCA\RStiker\Service;
 
 use OCP\Files\NotPermittedException;
+use OCP\IL10N;
 use OCP\IURLGenerator;
 
 /**
@@ -36,6 +37,7 @@ class StickerService {
 	public function __construct(
 		private readonly StorageService $storage,
 		private readonly IURLGenerator $urlGenerator,
+		private readonly IL10N $l10n,
 	) {
 	}
 
@@ -117,7 +119,7 @@ class StickerService {
 
 		$pack = $this->buildPackData($name);
 		if ($pack === null) {
-			throw new \RuntimeException('Could not create the sticker pack');
+			throw new \RuntimeException($this->l10n->t('The sticker pack could not be created'));
 		}
 
 		return $pack;
@@ -128,16 +130,16 @@ class StickerService {
 	 */
 	public function updatePack(string $packName, ?string $name = null, ?string $displayName = null, ?string $description = null): array {
 		if ($this->storage->getPackFolder($packName) === null) {
-			throw new \InvalidArgumentException('Pack not found');
+			throw new \InvalidArgumentException($this->l10n->t('Pack not found'));
 		}
 
 		$newName = trim($name ?? $packName);
 		if ($newName !== $packName) {
 			if (!StorageService::isValidPackName($newName)) {
-				throw new \InvalidArgumentException('Invalid pack name');
+				throw new \InvalidArgumentException($this->l10n->t('This pack name is not allowed'));
 			}
 			if ($this->storage->getPackFolder($newName) !== null) {
-				throw new \InvalidArgumentException('A pack with this name already exists');
+				throw new \InvalidArgumentException($this->l10n->t('A pack with this name already exists'));
 			}
 			$this->storage->renamePackFolder($packName, $newName);
 			$this->storage->renamePackMetadata($packName, $newName);
@@ -155,7 +157,7 @@ class StickerService {
 
 		$pack = $this->buildPackData($newName);
 		if ($pack === null) {
-			throw new \RuntimeException('Could not update the sticker pack');
+			throw new \RuntimeException($this->l10n->t('The sticker pack could not be updated'));
 		}
 
 		return $pack;
@@ -253,6 +255,56 @@ class StickerService {
 	}
 
 	/**
+	 * Filter sticker ids down to the ones that still exist.
+	 *
+	 * The "Recent" list of the frontend keeps the stickers that were sent last.
+	 * When the library changed, it asks which of them are still there, so that
+	 * deleted stickers can be dropped from the local list.
+	 *
+	 * @param list<string> $stickerIds
+	 * @return list<string> ids of existing stickers, in the order they were asked for
+	 */
+	public function filterExistingStickerIds(array $stickerIds): array {
+		$byPack = [];
+		foreach ($stickerIds as $stickerId) {
+			if (!is_string($stickerId)) {
+				continue;
+			}
+
+			$decoded = $this->decodeStickerId($stickerId);
+			if ($decoded === null) {
+				continue;
+			}
+
+			[$packName, $fileName] = $decoded;
+			$byPack[$packName][$fileName] = $stickerId;
+		}
+
+		$existing = [];
+		foreach ($byPack as $packName => $files) {
+			// Numeric pack names become integer array keys; the storage API
+			// expects a string.
+			$packName = (string)$packName;
+
+			$present = [];
+			foreach ($this->storage->getStickerFiles($packName) as $file) {
+				$present[$file->getName()] = true;
+			}
+
+			foreach ($files as $fileName => $stickerId) {
+				if (isset($present[$fileName])) {
+					$existing[$stickerId] = true;
+				}
+			}
+		}
+
+		return array_values(array_filter(
+			$stickerIds,
+			static fn ($stickerId): bool => is_string($stickerId) && isset($existing[$stickerId])
+		));
+	}
+
+	/**
 	 * Validates and stores a sticker file. The mime type is detected from the
 	 * file content, never from the file name or the browser provided type.
 	 *
@@ -260,38 +312,38 @@ class StickerService {
 	 */
 	public function addSticker(string $packName, string $sourcePath, string $originalName, ?string $title = null): array {
 		if ($this->storage->getPackFolder($packName) === null) {
-			throw new \InvalidArgumentException('Pack not found');
+			throw new \InvalidArgumentException($this->l10n->t('Pack not found'));
 		}
 
 		$size = is_file($sourcePath) ? (int)filesize($sourcePath) : 0;
 		if ($size <= 0) {
-			throw new \InvalidArgumentException('Empty file');
+			throw new \InvalidArgumentException($this->l10n->t('The file is empty'));
 		}
 		if ($size > self::ABSOLUTE_MAX_FILE_SIZE) {
-			throw new \InvalidArgumentException('File is too large');
+			throw new \InvalidArgumentException($this->l10n->t('The file is too large'));
 		}
 
 		$mimeType = $this->detectMimeType($sourcePath);
 		if ($mimeType === null) {
-			throw new \InvalidArgumentException('Unsupported file type, only PNG, GIF, JPEG and WEBP stickers are allowed');
+			throw new \InvalidArgumentException($this->l10n->t('Only PNG, GIF, JPEG and WEBP images can be used as stickers'));
 		}
 		$extension = self::MIME_EXTENSIONS[$mimeType];
 
 		$content = file_get_contents($sourcePath);
 		if ($content === false) {
-			throw new \RuntimeException('Could not read the sticker file');
+			throw new \RuntimeException($this->l10n->t('The sticker file could not be read'));
 		}
 
 		$folder = $this->storage->getPackFolder($packName);
 		if ($folder === null) {
-			throw new \InvalidArgumentException('Pack not found');
+			throw new \InvalidArgumentException($this->l10n->t('Pack not found'));
 		}
 
 		$fileName = $this->buildUniqueFileName($packName, $this->sanitizeFileName($originalName), $extension);
 		try {
 			$folder->newFile($fileName, $content);
 		} catch (NotPermittedException $e) {
-			throw new \RuntimeException('Could not store the sticker', 0, $e);
+			throw new \RuntimeException($this->l10n->t('The sticker could not be saved'), 0, $e);
 		}
 
 		$metadata = $this->storage->readMetadata($packName);
@@ -464,10 +516,10 @@ class StickerService {
 	private function requireSticker(string $packName, string $stickerId): array {
 		$decoded = $this->decodeStickerId($stickerId);
 		if ($decoded === null || $decoded[0] !== $packName) {
-			throw new \InvalidArgumentException('Sticker not found');
+			throw new \InvalidArgumentException($this->l10n->t('Sticker not found'));
 		}
 		if ($this->storage->getStickerFile($packName, $decoded[1]) === null) {
-			throw new \InvalidArgumentException('Sticker not found');
+			throw new \InvalidArgumentException($this->l10n->t('Sticker not found'));
 		}
 
 		return $decoded;

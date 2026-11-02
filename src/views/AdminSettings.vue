@@ -4,26 +4,26 @@
 -->
 <template>
 	<NcSettingsSection
-		:name="t('r-stiker', 'Стикеры (R-Stiker)')"
-		:description="t('r-stiker', 'Стикерпаки для Talk и Text. Паки и стикеры лежат в appdata приложения (r-stiker/packs), база данных не используется.')">
+		:name="t('r-stiker', 'Sticker packs')"
+		:description="t('r-stiker', 'Packs of stickers for Talk and Text. Everything is stored in the app data folder (r-stiker/packs), no database is involved.')">
 		<form class="r-stiker-admin__create" @submit.prevent="createPack()">
-			<h3>{{ t('r-stiker', 'Новый стикерпак') }}</h3>
+			<h3>{{ t('r-stiker', 'New pack') }}</h3>
 			<div class="r-stiker-admin__fields">
 				<NcTextField
 					v-model="newPack.name"
-					:label="t('r-stiker', 'Имя папки')"
-					placeholder="My pack" />
+					:label="t('r-stiker', 'Folder name')"
+					:placeholder="t('r-stiker', 'My pack')" />
 				<NcTextField
 					v-model="newPack.displayName"
-					:label="t('r-stiker', 'Отображаемое имя')" />
+					:label="t('r-stiker', 'Display name')" />
 				<NcTextField
 					v-model="newPack.description"
-					:label="t('r-stiker', 'Описание')" />
+					:label="t('r-stiker', 'Description')" />
 				<NcButton
 					variant="primary"
 					:disabled="creating || newPack.name.trim() === ''"
 					@click="createPack()">
-					{{ t('r-stiker', 'Создать пак') }}
+					{{ t('r-stiker', 'Create pack') }}
 				</NcButton>
 			</div>
 		</form>
@@ -41,7 +41,7 @@
 		</div>
 
 		<p v-else-if="packs.length === 0" class="r-stiker-admin__status">
-			{{ t('r-stiker', 'Пока нет ни одного стикерпака') }}
+			{{ t('r-stiker', 'No sticker packs yet') }}
 		</p>
 
 		<template v-else>
@@ -52,36 +52,36 @@
 					<span class="r-stiker-admin__slug">({{ pack.name }})</span>
 				</h3>
 				<span class="r-stiker-admin__badge">
-					{{ n('r-stiker', '%n стикер', '%n стикеров', pack.stickerCount) }}
+					{{ n('r-stiker', '%n sticker', '%n stickers', pack.stickerCount) }}
 				</span>
 				<div class="r-stiker-admin__actions">
 					<NcButton variant="secondary" @click="toggleStickers(pack)">
-						{{ expandedPack === pack.name ? t('r-stiker', 'Скрыть стикеры') : t('r-stiker', 'Стикеры') }}
+						{{ expandedPack === pack.name ? t('r-stiker', 'Hide stickers') : t('r-stiker', 'Stickers') }}
 					</NcButton>
 					<NcButton variant="secondary" @click="toggleEdit(pack)">
-						{{ t('r-stiker', 'Изменить') }}
+						{{ t('r-stiker', 'Edit') }}
 					</NcButton>
 					<NcButton variant="error" @click="requestDelete(pack)">
-						{{ deleteRequested === pack.name ? t('r-stiker', 'Подтвердить удаление') : t('r-stiker', 'Удалить') }}
+						{{ deleteRequested === pack.name ? t('r-stiker', 'Confirm deletion') : t('r-stiker', 'Delete') }}
 					</NcButton>
 				</div>
 			</header>
 
 			<div v-if="editPack === pack.name" class="r-stiker-admin__edit">
 				<div class="r-stiker-admin__fields">
-					<NcTextField v-model="editForm.name" :label="t('r-stiker', 'Имя папки')" />
-					<NcTextField v-model="editForm.displayName" :label="t('r-stiker', 'Отображаемое имя')" />
-					<NcTextArea v-model="editForm.description" :label="t('r-stiker', 'Описание')" />
+					<NcTextField v-model="editForm.name" :label="t('r-stiker', 'Folder name')" />
+					<NcTextField v-model="editForm.displayName" :label="t('r-stiker', 'Display name')" />
+					<NcTextArea v-model="editForm.description" :label="t('r-stiker', 'Description')" />
 				</div>
 				<p class="r-stiker-admin__hint">
-					{{ t('r-stiker', 'Переименование папки меняет ссылки стикеров: уже отправленные стикеры перестанут отображаться.') }}
+					{{ t('r-stiker', 'Renaming the folder changes the links of its stickers, so stickers that were sent before will stop being displayed.') }}
 				</p>
 				<div class="r-stiker-admin__actions">
 					<NcButton variant="primary" :disabled="savingPack" @click="savePack(pack)">
-						{{ t('r-stiker', 'Сохранить') }}
+						{{ t('r-stiker', 'Save') }}
 					</NcButton>
 					<NcButton variant="tertiary" @click="closeEdit()">
-						{{ t('r-stiker', 'Отмена') }}
+						{{ t('r-stiker', 'Cancel') }}
 					</NcButton>
 				</div>
 			</div>
@@ -93,13 +93,13 @@
 					@dragover.prevent="dragTarget = pack.name"
 					@dragleave="dragTarget = null"
 					@drop.prevent="onDrop(pack, $event)">
-					<p>{{ t('r-stiker', 'Перетащите PNG, GIF, JPEG или WEBP сюда') }}</p>
+					<p>{{ t('r-stiker', 'Drop PNG, GIF, JPEG or WEBP files here') }}</p>
 					<NcButton variant="secondary" :disabled="uploading" @click="openFileDialog(pack)">
-						{{ t('r-stiker', 'Выбрать файлы') }}
+						{{ t('r-stiker', 'Choose files') }}
 					</NcButton>
 					<p v-if="uploadStatus" class="r-stiker-admin__hint">{{ uploadStatus }}</p>
 					<p class="r-stiker-admin__hint">
-						{{ t('r-stiker', 'SVG не поддерживается. До 5 МиБ на файл.') }}
+						{{ t('r-stiker', 'SVG is not supported. Up to 5 MiB per file.') }}
 					</p>
 				</div>
 
@@ -108,7 +108,7 @@
 				</div>
 
 				<p v-else-if="stickers.length === 0" class="r-stiker-admin__status">
-					{{ t('r-stiker', 'В этом паке ещё нет стикеров') }}
+					{{ t('r-stiker', 'This pack has no stickers yet') }}
 				</p>
 
 				<div v-else class="r-stiker-admin__grid">
@@ -116,16 +116,16 @@
 						<img
 							class="r-stiker-admin__image"
 							:src="sticker.thumbnailUrl"
-							:alt="sticker.title"
+							:alt="sticker.title || sticker.name"
 							loading="lazy">
 						<input
 							class="r-stiker-admin__title-input"
 							type="text"
 							:value="sticker.title"
-							:aria-label="t('r-stiker', 'Название стикера')"
+							:aria-label="t('r-stiker', 'Sticker description')"
 							@change="renameSticker(sticker, $event.target.value)">
 						<NcButton variant="tertiary" @click="removeSticker(sticker)">
-							{{ t('r-stiker', 'Удалить') }}
+							{{ t('r-stiker', 'Delete') }}
 						</NcButton>
 					</div>
 				</div>
@@ -226,7 +226,7 @@ export default {
 				})
 				this.newPack = { name: '', displayName: '', description: '' }
 				await this.loadPacks()
-				showSuccess(t('r-stiker', 'Стикерпак создан'))
+				showSuccess(t('r-stiker', 'Pack created'))
 			} catch (error) {
 				showError(messageFromError(error))
 			} finally {
@@ -267,7 +267,7 @@ export default {
 				}
 				this.editPack = null
 				await this.loadPacks()
-				showSuccess(t('r-stiker', 'Пак сохранён'))
+				showSuccess(t('r-stiker', 'Pack saved'))
 			} catch (error) {
 				showError(messageFromError(error))
 			} finally {
@@ -293,7 +293,7 @@ export default {
 					this.stickers = []
 				}
 				await this.loadPacks()
-				showSuccess(t('r-stiker', 'Пак удалён'))
+				showSuccess(t('r-stiker', 'Pack deleted'))
 			} catch (error) {
 				showError(messageFromError(error))
 			}
@@ -375,17 +375,17 @@ export default {
 				} catch (error) {
 					failures.push(`${file.name}: ${messageFromError(error)}`)
 				}
-				this.uploadStatus = t('r-stiker', 'Загружено {done} из {total}…', { done, total: list.length })
+				this.uploadStatus = t('r-stiker', 'Uploading {done} of {total}…', { done, total: list.length })
 			}
 
 			this.uploadStatus = null
 			this.uploading = false
 
 			if (done > 0) {
-				showSuccess(n('r-stiker', 'Загружен %n стикер', 'Загружено %n стикеров', done))
+				showSuccess(n('r-stiker', '%n sticker uploaded', '%n stickers uploaded', done))
 			}
 			if (failures.length > 0) {
-				showError(t('r-stiker', 'Не загружено: {list}', { list: failures.join('; ') }))
+				showError(t('r-stiker', 'Could not upload: {list}', { list: failures.join('; ') }))
 			}
 
 			await this.loadPacks()

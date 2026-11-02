@@ -15,6 +15,7 @@ use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\Attribute\PublicPage;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\AppFramework\OCSController;
+use OCP\IL10N;
 use OCP\IRequest;
 
 /**
@@ -30,6 +31,7 @@ class ApiController extends OCSController {
 		string $appName,
 		IRequest $request,
 		private readonly StickerService $stickerService,
+		private readonly IL10N $l10n,
 	) {
 		parent::__construct($appName, $request);
 	}
@@ -45,7 +47,7 @@ class ApiController extends OCSController {
 	public function getPack(string $pack): DataResponse {
 		$pack = $this->stickerService->getPack($pack);
 		if ($pack === null) {
-			return new DataResponse(['error' => 'Pack not found'], Http::STATUS_NOT_FOUND);
+			return new DataResponse(['error' => $this->l10n->t('Pack not found')], Http::STATUS_NOT_FOUND);
 		}
 
 		return new DataResponse($pack);
@@ -81,6 +83,26 @@ class ApiController extends OCSController {
 		return new DataResponse($this->stickerService->getStickers($pack, $cursor, $limit));
 	}
 
+	/**
+	 * Which of the given sticker ids still exist.
+	 *
+	 * The frontend keeps the last sent stickers in its "Recent" tab and calls
+	 * this after the library changed, to drop stickers that were deleted.
+	 */
+	#[PublicPage]
+	#[NoCSRFRequired]
+	public function checkStickers($ids = []): DataResponse {
+		$ids = is_array($ids) ? $ids : [];
+		$ids = array_slice(array_values(array_filter($ids, 'is_string')), 0, 200);
+
+		$response = new DataResponse([
+			'existing' => $this->stickerService->filterExistingStickerIds($ids),
+		]);
+		$response->cacheFor(0);
+
+		return $response;
+	}
+
 	public function createPack(string $name = '', ?string $displayName = null, ?string $description = null): DataResponse {
 		try {
 			$pack = $this->stickerService->createPack($name, $displayName, $description);
@@ -114,7 +136,7 @@ class ApiController extends OCSController {
 	public function addSticker(string $pack, ?string $title = null): DataResponse {
 		$upload = $this->request->getUploadedFile('file');
 		if (!is_array($upload)) {
-			return new DataResponse(['error' => 'No file uploaded'], Http::STATUS_BAD_REQUEST);
+			return new DataResponse(['error' => $this->l10n->t('No file was uploaded')], Http::STATUS_BAD_REQUEST);
 		}
 
 		$error = (int)($upload['error'] ?? UPLOAD_ERR_NO_FILE);
@@ -124,16 +146,16 @@ class ApiController extends OCSController {
 
 		$tmpName = (string)($upload['tmp_name'] ?? '');
 		if ($tmpName === '' || !is_uploaded_file($tmpName)) {
-			return new DataResponse(['error' => 'Invalid upload'], Http::STATUS_BAD_REQUEST);
+			return new DataResponse(['error' => $this->l10n->t('The uploaded file is not valid')], Http::STATUS_BAD_REQUEST);
 		}
 
 		$size = (int)($upload['size'] ?? 0);
 		if ($size <= 0) {
-			return new DataResponse(['error' => 'Empty file'], Http::STATUS_BAD_REQUEST);
+			return new DataResponse(['error' => $this->l10n->t('The file is empty')], Http::STATUS_BAD_REQUEST);
 		}
 		if ($size > StickerService::MAX_FILE_SIZE) {
 			return new DataResponse(
-				['error' => 'The sticker is too large, the limit is ' . StickerService::MAX_FILE_SIZE . ' bytes'],
+				['error' => $this->l10n->t('The sticker is too large. The limit is {size} bytes.', ['size' => StickerService::MAX_FILE_SIZE])],
 				Http::STATUS_BAD_REQUEST
 			);
 		}
@@ -175,10 +197,10 @@ class ApiController extends OCSController {
 
 	private function describeUploadError(int $code): string {
 		return match ($code) {
-			UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'The sticker is too large',
-			UPLOAD_ERR_PARTIAL => 'The upload was interrupted',
-			UPLOAD_ERR_NO_FILE => 'No file uploaded',
-			default => 'The file could not be uploaded',
+			UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => $this->l10n->t('The sticker is too large'),
+			UPLOAD_ERR_PARTIAL => $this->l10n->t('The upload was interrupted'),
+			UPLOAD_ERR_NO_FILE => $this->l10n->t('No file was uploaded'),
+			default => $this->l10n->t('The file could not be uploaded'),
 		};
 	}
 }

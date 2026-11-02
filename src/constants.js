@@ -10,6 +10,12 @@ export const REFERENCE_TYPE = 'r-stiker'
 
 export const FAVORITES_STORAGE_KEY = 'r-stiker-favorites'
 
+/** Last sent stickers, newest first. */
+export const RECENT_STORAGE_KEY = 'r-stiker-recent'
+
+/** How many sent stickers the "Recent" tab remembers. */
+export const MAX_RECENT_STICKERS = 100
+
 /** Local copy of the sticker list (packs and the pages which were opened). */
 export const STICKER_CACHE_KEY = 'r-stiker-stickers'
 

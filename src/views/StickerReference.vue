@@ -55,7 +55,8 @@ export default {
 
 		stickerAlt() {
 			// Only used by screen readers, never rendered next to the sticker.
-			return this.richObject?.sticker?.title ?? ''
+			const sticker = this.richObject?.sticker ?? {}
+			return sticker.title || sticker.name || ''
 		},
 
 		stickerWidth() {

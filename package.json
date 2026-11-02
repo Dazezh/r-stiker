@@ -1,7 +1,7 @@
 {
 	"name": "r-stiker",
-	"version": "1.1.0",
-	"description": "Sticker messages for Nextcloud Talk and Text",
+	"version": "1.3.0",
+	"description": "Sticker packs for Nextcloud Talk and Text",
 	"type": "module",
 	"private": true,
 	"scripts": {

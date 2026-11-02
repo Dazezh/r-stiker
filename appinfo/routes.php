@@ -18,6 +18,8 @@ return [
 		['name' => 'api#getPack', 'url' => '/api/v1/packs/{pack}', 'verb' => 'GET'],
 		['name' => 'api#getRevision', 'url' => '/api/v1/revision', 'verb' => 'GET'],
 		['name' => 'api#getStickers', 'url' => '/api/v1/stickers/{pack}', 'verb' => 'GET'],
+		// Has to stay before the pack routes, otherwise "check" would be read as a pack name.
+		['name' => 'api#checkStickers', 'url' => '/api/v1/stickers/check', 'verb' => 'POST'],
 
 		// Administration API: admin rights are enforced by the security middleware.
 		['name' => 'api#createPack', 'url' => '/api/v1/packs', 'verb' => 'POST'],

@@ -4,6 +4,7 @@
  */
 
 import axios from '@nextcloud/axios'
+import { t } from '@nextcloud/l10n'
 import { generateOcsUrl } from '@nextcloud/router'
 import { APP_ID } from '../constants.js'
 
@@ -27,7 +28,7 @@ export function messageFromError(error) {
 	return error?.response?.data?.ocs?.meta?.message
 		?? error?.response?.data?.error
 		?? error?.message
-		?? 'Unknown error'
+		?? t('r-stiker', 'Something went wrong')
 }
 
 /** Public API */
@@ -74,6 +75,24 @@ export async function fetchStickers(pack, cursor = 0, limit = 60) {
 			{ pack, cursor, limit }
 		)
 	)) ?? { entries: [], cursor: null, total: 0 }
+}
+
+/**
+ * Ask the server which of the given sticker ids still exist.
+ *
+ * Used by the "Recent" tab: after the library changed, stickers that were
+ * deleted in the meantime have to disappear from the local list.
+ *
+ * @param {string[]} ids sticker ids
+ * @return {Promise<string[]>} ids of the stickers that still exist
+ */
+export async function checkStickerIds(ids) {
+	const data = payload(await axios.post(
+		generateOcsUrl(`apps/${APP_ID}/api/v1/stickers/check`),
+		{ ids }
+	))
+
+	return Array.isArray(data?.existing) ? data.existing : []
 }
 
 /** Administration API */
